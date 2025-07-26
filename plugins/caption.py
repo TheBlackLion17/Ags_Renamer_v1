@@ -2,6 +2,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database import db
 from filter_plugins import force_sub
+from logger import logger # Import logger
 
 # This plugin provides commands related to custom captions.
 
@@ -9,7 +10,8 @@ from filter_plugins import force_sub
 async def set_caption_command(client: Client, message: Message):
     """Allows user to set a default custom caption."""
     user_id = message.from_user.id
-    db.update_user_field(user_id, "active_file_operation.state", "waiting_for_global_caption") # Use a different state
+    logger.info(f"User {user_id} sent /set_caption.")
+    db.update_user_field(user_id, "active_file_operation", {"state": "waiting_for_global_caption"}) # Use a different state
     await message.reply_text(
         "Please send the **new default caption** you want to use for your uploads.\n\n"
         "You can use HTML tags (e.g., `<b>`, `<i>`, `<a href=...>`, `<code>`).\n"
@@ -20,6 +22,7 @@ async def set_caption_command(client: Client, message: Message):
 async def view_caption_command(client: Client, message: Message):
     """Allows user to view their current default custom caption."""
     user_id = message.from_user.id
+    logger.info(f"User {user_id} sent /view_caption.")
     user_data = db.get_user(user_id)
     current_caption = user_data.get("custom_caption")
     if current_caption:
@@ -27,15 +30,19 @@ async def view_caption_command(client: Client, message: Message):
             f"Your current default caption is:\n\n`{current_caption}`\n\n"
             "You can change it using /set_caption or clear it with /clear_caption."
         )
+        logger.info(f"User {user_id}: Displayed current caption.")
     else:
         await message.reply_text("You don't have a custom default caption set. Use /set_caption to set one.")
+        logger.info(f"User {user_id}: No default caption found.")
 
 @Client.on_message(filters.command("clear_caption") & filters.private & force_sub)
 async def clear_caption_command(client: Client, message: Message):
     """Allows user to clear their default custom caption."""
     user_id = message.from_user.id
+    logger.info(f"User {user_id} sent /clear_caption.")
     db.update_user_field(user_id, "custom_caption", None)
     await message.reply_text("Your default custom caption has been cleared.")
+    logger.info(f"User {user_id}: Default caption cleared.")
 
 # Intercepting text messages for 'waiting_for_global_caption' state
 @Client.on_message(filters.private & filters.text & filters.incoming & force_sub)
@@ -45,15 +52,20 @@ async def handle_caption_text_input(client: Client, message: Message):
     
     # Check if the user is in the state of setting a global caption
     if user_data.get("active_file_operation", {}).get("state") == "waiting_for_global_caption":
+        logger.info(f"User {user_id}: Received text for global caption setting.")
         if message.text == "/cancel_caption":
             db.update_user_field(user_id, "active_file_operation.state", None)
+            db.clear_active_operation(user_id) # Clear the temporary active_file_operation used for state
             await message.reply_text("Setting default caption cancelled.")
+            logger.info(f"User {user_id}: Cancelled default caption setting.")
             return
 
         new_caption = message.text.strip()
         db.update_user_field(user_id, "custom_caption", new_caption)
         db.update_user_field(user_id, "active_file_operation.state", None) # Clear state
+        db.clear_active_operation(user_id) # Clear the temporary active_file_operation used for state
         await message.reply_text(f"Your new default caption has been set:\n\n`{new_caption}`")
+        logger.info(f"User {user_id}: New default caption set.")
     # This handler should be placed carefully or given a lower group/order
     # to avoid conflicting with the main handlers.py's text handler.
     # The `force_sub` filter should ensure it only processes valid users.
