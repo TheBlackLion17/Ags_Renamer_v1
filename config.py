@@ -7,6 +7,7 @@ load_dotenv()
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0")) 
 
 # --- FORCE SUBSCRIBE CONFIGURATION ---
 # ID of the channel(s) users must join. Use username (without @) or channel ID.
