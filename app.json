@@ -1,0 +1,56 @@
+{
+  "name": "File Renamer Bot",
+  "description": "A powerful Telegram bot to rename files, add custom thumbnails, and more!",
+  "repository": "https://github.com/yourusername/your-renamer-bot",
+  "keywords": ["telegram", "bot", "pyrogram", "renamer", "file", "mongodb"],
+  "addons": [
+    {
+      "plan": "mongolab:sandbox"
+    }
+  ],
+  "env": {
+    "API_ID": {
+      "description": "Your Telegram API ID from my.telegram.org",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Your Telegram API Hash from my.telegram.org",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Your Bot Token from @BotFather",
+      "required": true
+    },
+    "MONGO_DB_URI": {
+      "description": "MongoDB Connection URI (e.g., from MongoDB Atlas)",
+      "required": true
+    },
+    "FORCE_SUB_CHANNELS": {
+      "description": "Comma-separated list of channel IDs/usernames for force subscribe (e.g., -1001234567890,my_channel_username)",
+      "required": false
+    },
+    "ADMINS": {
+      "description": "Comma-separated list of Telegram User IDs for bot administrators (e.g., 123456789,987654321)",
+      "required": false
+    },
+    "START_UP_PIC": {
+      "description": "Direct URL to an image for the bot's /start message",
+      "required": false
+    },
+    "UPDATE_CHANNEL_URL": {
+      "description": "Optional: Link to your bot's update channel",
+      "required": false
+    },
+    "SUPPORT_GROUP_URL": {
+      "description": "Optional: Link to your bot's support group",
+      "required": false
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "free"
+    }
+  },
+  "stack": "container"
+}
