@@ -3,12 +3,14 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database import db
 from config import PREMIUM_PLANS
 from filter_plugins import force_sub
+from logger import logger # Import logger
 import datetime
 
 @Client.on_message(filters.command("myplan") & filters.private & force_sub)
 async def myplan_command(client: Client, message: Message):
     """Displays the user's current plan information."""
     user_id = message.from_user.id
+    logger.info(f"User {user_id} sent /myplan.")
     user_data = db.get_user(user_id)
 
     plan_info_text = (
@@ -20,7 +22,9 @@ async def myplan_command(client: Client, message: Message):
     )
 
     if user_data.get("plan_expiry_date"):
-        plan_info_text += f"**Plan Expires:** `{user_data['plan_expiry_date'].strftime('%Y-%m-%d %H:%M:%S')}`\n"
+        # Format datetime object for display
+        expiry_date_str = user_data['plan_expiry_date'].strftime('%Y-%m-%d %H:%M:%S')
+        plan_info_text += f"**Plan Expires:** `{expiry_date_str}`\n"
     else:
         plan_info_text += "**Plan Expiry:** `N/A` (Free Plan)\n"
     
@@ -41,3 +45,4 @@ async def myplan_command(client: Client, message: Message):
     )
 
     await message.reply_text(plan_info_text, reply_markup=keyboard)
+    logger.info(f"User {user_id}: Displayed myplan info.")
