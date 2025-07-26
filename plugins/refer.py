@@ -1,18 +1,21 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database import db
-from config import BOT_TOKEN # Assuming BOT_TOKEN can be used to construct bot username
-import os # For getting bot username from env or client
+from logger import logger # Import logger
+# BOT_TOKEN is not directly used for client.get_me(), client object handles it.
 
 @Client.on_message(filters.command("refer") & filters.private)
 async def refer_command(client: Client, message: Message):
     """Generates a referral link for the user."""
     user_id = message.from_user.id
+    logger.info(f"User {user_id} sent /refer.")
     user_data = db.get_user(user_id) # Ensures user exists
 
     # Construct bot's username
-    bot_username = (await client.get_me()).username
-    if not bot_username:
+    try:
+        bot_username = (await client.get_me()).username
+    except Exception as e:
+        logger.error(f"Error getting bot username for referral link: {e}", exc_info=True)
         await message.reply_text("Could not get bot username. Referral link not available.")
         return
 
@@ -36,32 +39,55 @@ async def refer_command(client: Client, message: Message):
     )
 
     await message.reply_text(referral_text, reply_markup=keyboard, disable_web_page_preview=True)
+    logger.info(f"User {user_id}: Sent referral link.")
 
 
 @Client.on_message(filters.command("start") & filters.private)
 async def handle_referral_start(client: Client, message: Message):
     """
     Intercepts /start commands to check for referral parameters.
-    This needs to run *before* the main /start handler if possible,
-    or be integrated carefully.
+    This handler needs to execute *before* the main /start handler in plugins/start.py
+    for the referral logic to apply. Pyrogram executes filters in order of plugin loading.
     """
+    user_id = message.from_user.id
+    
     if message.text and len(message.text.split()) > 1:
         param = message.text.split(None, 1)[1]
         if param.startswith("ref_"):
-            referred_by_id = int(param.split("_")[1])
-            referrer_user_data = db.get_user(referred_by_id)
-            
-            if referrer_user_data and referred_by_id != message.from_user.id:
-                # Store the referrer ID for the new user
-                db.update_user_field(message.from_user.id, "referred_by", referred_by_id)
-                await message.reply_text(f"You were referred by user `{referred_by_id}`! Welcome!")
-                # Here, you'd add logic to give benefits to the referrer
-                # e.g., db.increment_referrer_benefits(referred_by_id)
-            else:
-                await message.reply_text("Invalid referral link or you tried to refer yourself.")
+            try:
+                referred_by_id = int(param.split("_")[1])
+                logger.info(f"User {user_id} started with referral from {referred_by_id}.")
+
+                # Prevent self-referral
+                if referred_by_id == user_id:
+                    await message.reply_text("You cannot refer yourself!")
+                    logger.warning(f"User {user_id}: Attempted self-referral.")
+                    return # Do not proceed with referral logic, but let /start handler continue
+                
+                referrer_user_data = db.get_user(referred_by_id) # Get referrer data
+                
+                if referrer_user_data:
+                    current_user_data = db.get_user(user_id) # Ensure current user is in DB
+                    
+                    if not current_user_data.get("referred_by"): # Only set if not already referred
+                        db.update_user_field(user_id, "referred_by", referred_by_id)
+                        await message.reply_text(f"You were referred by user `{referred_by_id}`! Welcome!")
+                        logger.info(f"User {user_id} successfully referred by {referred_by_id}.")
+                        # Here, you'd add logic to give benefits to the referrer
+                        # e.g., db.increment_referrer_benefits(referred_by_id, amount=1)
+                    else:
+                        await message.reply_text(f"You have already been referred by user `{current_user_data['referred_by']}`.")
+                        logger.info(f"User {user_id} already referred by {current_user_data['referred_by']}.")
+                else:
+                    await message.reply_text("Invalid referral link or referrer not found.")
+                    logger.warning(f"User {user_id}: Invalid referral link/referrer {referred_by_id} not found.")
+
+            except ValueError:
+                await message.reply_text("Invalid referral link format.")
+                logger.warning(f"User {user_id}: Invalid referral link format: {param}.")
+            except Exception as e:
+                logger.error(f"Error handling referral for user {user_id} with param {param}: {e}", exc_info=True)
+                await message.reply_text("An error occurred while processing your referral. Please try /start again.")
     
-    # Crucially, let the main /start handler (in handlers.py) continue its work
-    # if this handler doesn't fully process the command or if there's no referral.
-    # Pyrogram processes handlers based on filter order. If this is a plugin,
-    # it needs to be loaded appropriately or you need to re-think how /start is handled.
-    # For now, it's illustrative.
+    # This handler finishes and implicitly allows other handlers with the same filter
+    # (like the main /start in plugins.start) to execute after it.
