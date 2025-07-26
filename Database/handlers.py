@@ -3,15 +3,16 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import FloodWait, RPCError
 import asyncio
-import time # Import time for start_time
+import time 
 from utils import get_or_generate_thumbnail
 from database import db
 from config import (
     UPDATE_CHANNEL_URL, SUPPORT_GROUP_URL, HELP_TEXT, ABOUT_TEXT,
-    START_UP_PIC, ADMINS
+    START_UP_PIC, ADMINS, DOWNLOAD_DIR, THUMBNAIL_DIR
 )
 from filter_plugins import force_sub
 from progress import progress_for_pyrogram
+from logger import logger # Import logger
 
 # --- States for Custom Thumbnail/Caption ---
 # Using active_file_operation in DB for conversation state
@@ -22,6 +23,7 @@ from progress import progress_for_pyrogram
 async def start_command(client: Client, message: Message):
     """Handles the /start command and displays user plan info with inline keyboard."""
     user_id = message.from_user.id
+    logger.info(f"User {user_id} sent /start command.")
     user_data = db.get_user(user_id) # Get or create user
 
     plan_info = (
@@ -50,15 +52,26 @@ async def start_command(client: Client, message: Message):
     )
 
     if START_UP_PIC and START_UP_PIC.startswith(("http", "https")):
-        await client.send_photo(
-            chat_id=message.chat.id,
-            photo=START_UP_PIC,
-            caption=f"Hello {message.from_user.first_name}! I am a powerful File Renamer Bot.\n\n"
-                    "I can rename files, change thumbnails, and support custom captions.\n\n"
-                    f"{plan_info}\n"
-                    "Send me a file (document, photo, video, audio) to rename it.",
-            reply_markup=keyboard
-        )
+        try:
+            await client.send_photo(
+                chat_id=message.chat.id,
+                photo=START_UP_PIC,
+                caption=f"Hello {message.from_user.first_name}! I am a powerful File Renamer Bot.\n\n"
+                        "I can rename files, change thumbnails, and support custom captions.\n\n"
+                        f"{plan_info}\n"
+                        "Send me a file (document, photo, video, audio) to rename it.",
+                reply_markup=keyboard
+            )
+            logger.info(f"User {user_id}: Sent start photo with greeting.")
+        except Exception as e:
+            logger.error(f"User {user_id}: Failed to send start photo: {e}", exc_info=True)
+            await message.reply_text(
+                f"Hello {message.from_user.first_name}! I am a powerful File Renamer Bot.\n\n"
+                "I can rename files, change thumbnails, and support custom captions.\n\n"
+                f"{plan_info}\n"
+                "Send me a file (document, photo, video, audio) to rename it.",
+                reply_markup=keyboard
+            )
     else:
         await message.reply_text(
             f"Hello {message.from_user.first_name}! I am a powerful File Renamer Bot.\n\n"
@@ -67,6 +80,7 @@ async def start_command(client: Client, message: Message):
             "Send me a file (document, photo, video, audio) to rename it.",
             reply_markup=keyboard
         )
+        logger.info(f"User {user_id}: Sent start text message with greeting.")
 
 
 @Client.on_callback_query()
@@ -74,13 +88,17 @@ async def handle_callback_query(client: Client, callback_query: CallbackQuery):
     """Handles inline keyboard button presses."""
     user_id = callback_query.from_user.id
     data = callback_query.data
-
+    logger.info(f"User {user_id} clicked callback: {data}")
+    
     if data == "check_force_sub":
         await callback_query.answer("Checking subscription status...", show_alert=True)
+        # Re-call start_command to re-evaluate force_sub and send main menu if subscribed
         await start_command(client, callback_query.message)
         return
 
+    # All other callbacks should be protected by force_sub
     if not await force_sub(None, client, callback_query):
+        logger.warning(f"User {user_id} failed force_sub check on callback {data}.")
         return
 
     active_op = db.get_active_operation(user_id)
@@ -121,35 +139,40 @@ async def handle_callback_query(client: Client, callback_query: CallbackQuery):
                 ]
             ]
         )
-        if START_UP_PIC and START_UP_PIC.startswith(("http", "https")):
-            try:
+        caption_text = f"Hello {callback_query.from_user.first_name}! I am a powerful File Renamer Bot.\n\n" \
+                       "I can rename files, change thumbnails, and support custom captions.\n\n" \
+                       f"{plan_info}\n" \
+                       "Send me a file (document, photo, video, audio) to rename it."
+        
+        try:
+            if callback_query.message.photo and START_UP_PIC and START_UP_PIC.startswith(("http", "https")):
+                await callback_query.message.edit_caption(
+                    caption=caption_text,
+                    reply_markup=keyboard
+                )
+            else:
                 await callback_query.message.delete()
-                await client.send_photo(
-                    chat_id=callback_query.message.chat.id,
-                    photo=START_UP_PIC,
-                    caption=f"Hello {callback_query.from_user.first_name}! I am a powerful File Renamer Bot.\n\n"
-                            "I can rename files, change thumbnails, and support custom captions.\n\n"
-                            f"{plan_info}\n"
-                            "Send me a file (document, photo, video, audio) to rename it.",
-                    reply_markup=keyboard
-                )
-            except RPCError as e:
-                print(f"Failed to delete message for start_menu re-send: {e}")
-                await callback_query.message.edit_text(
-                    f"Hello {callback_query.from_user.first_name}! I am a powerful File Renamer Bot.\n\n"
-                    "I can rename files, change thumbnails, and support custom captions.\n\n"
-                    f"{plan_info}\n"
-                    "Send me a file (document, photo, video, audio) to rename it.",
-                    reply_markup=keyboard
-                )
-        else:
-            await callback_query.message.edit_text(
-                f"Hello {callback_query.from_user.first_name}! I am a powerful File Renamer Bot.\n\n"
-                "I can rename files, change thumbnails, and support custom captions.\n\n"
-                f"{plan_info}\n"
-                "Send me a file (document, photo, video, audio) to rename it.",
-                reply_markup=keyboard
-            )
+                if START_UP_PIC and START_UP_PIC.startswith(("http", "https")):
+                    await client.send_photo(
+                        chat_id=callback_query.message.chat.id,
+                        photo=START_UP_PIC,
+                        caption=caption_text,
+                        reply_markup=keyboard
+                    )
+                else:
+                    await client.send_message(
+                        chat_id=callback_query.message.chat.id,
+                        text=caption_text,
+                        reply_markup=keyboard
+                    )
+            logger.info(f"User {user_id}: Returned to start menu.")
+        except RPCError as e:
+            logger.error(f"User {user_id}: Failed to edit/send message for start_menu callback: {e}", exc_info=True)
+            await callback_query.message.reply_text(caption_text, reply_markup=keyboard) # Fallback to reply
+        except Exception as e:
+            logger.error(f"User {user_id}: Unexpected error in start_menu callback: {e}", exc_info=True)
+            await callback_query.message.reply_text(caption_text, reply_markup=keyboard) # Fallback to reply
+
 
     elif data == "rename_file":
         if active_op:
@@ -159,24 +182,31 @@ async def handle_callback_query(client: Client, callback_query: CallbackQuery):
                 f"Okay, you want to rename `{original_name}`.\n\n"
                 "Please send me the **new name** for this file."
             )
+            logger.info(f"User {user_id}: Initiated rename for {original_name}.")
         else:
             await callback_query.message.edit_text("No file found to rename. Please send a file first.")
+            logger.warning(f"User {user_id}: Tried to rename but no active operation.")
     elif data == "cancel_operation":
         db.clear_active_operation(user_id)
         await callback_query.message.edit_text("Operation cancelled. Send a new file to start over.")
+        logger.info(f"User {user_id}: Cancelled active operation.")
     elif data == "add_thumbnail":
         if active_op:
             db.update_user_field(user_id, "active_file_operation.state", "waiting_for_thumbnail")
             await callback_query.message.edit_text("Please send the **image** you want to use as a custom thumbnail for this file. Send /skip_thumbnail to use default.")
+            logger.info(f"User {user_id}: Initiated adding specific thumbnail.")
         else:
             await callback_query.message.edit_text("No active file operation to add thumbnail to. Please send a file first.")
+            logger.warning(f"User {user_id}: Tried to add thumbnail but no active operation.")
     elif data == "add_caption":
         if active_op:
             db.update_user_field(user_id, "active_file_operation.state", "waiting_for_caption")
             await callback_query.message.edit_text("Please send the **custom caption** you want to use for this file. Send /skip_caption to use default.")
+            logger.info(f"User {user_id}: Initiated adding specific caption.")
         else:
             await callback_query.message.edit_text("No active file operation to add caption to. Please send a file first.")
-
+            logger.warning(f"User {user_id}: Tried to add caption but no active operation.")
+    
     await callback_query.answer()
 
 
@@ -184,6 +214,7 @@ async def handle_callback_query(client: Client, callback_query: CallbackQuery):
 async def handle_file(client: Client, message: Message):
     """Handles incoming file messages and prompts for action with inline buttons."""
     user_id = message.from_user.id
+    logger.info(f"User {user_id} sent a file.")
     user_data = db.get_user(user_id)
 
     active_op = db.get_active_operation(user_id)
@@ -192,9 +223,11 @@ async def handle_file(client: Client, message: Message):
             db.update_user_field(user_id, "active_file_operation.custom_thumbnail_id", message.photo.file_id)
             db.update_user_field(user_id, "active_file_operation.state", None) # Clear state
             await message.reply_text("Custom thumbnail received! Now send the **new name** for the file.")
+            logger.info(f"User {user_id}: Received custom thumbnail for active operation.")
             return
         else:
             await message.reply_text("That's not an image. Please send an **image** for the thumbnail, or /skip_thumbnail.")
+            logger.warning(f"User {user_id}: Sent non-image while waiting for thumbnail.")
             return
 
     file_type = None
@@ -220,6 +253,7 @@ async def handle_file(client: Client, message: Message):
                 f"Your daily upload limit of `{user_data['daily_upload_limit_gb']} GB` has been reached. "
                 "Please upgrade your plan or try again tomorrow."
             )
+            logger.warning(f"User {user_id}: Daily upload limit reached. File size: {file_size_gb:.2f}GB.")
             return
 
         original_name = getattr(file_info, "file_name", f"untitled_{file_type}")
@@ -234,8 +268,9 @@ async def handle_file(client: Client, message: Message):
             "file_size": file_info.file_size,
             "state": None,
             "custom_thumbnail_id": None,
-            "custom_caption_text": None
+            "custom_caption_text": user_data.get("custom_caption") # Apply user's default caption if set
         })
+        logger.info(f"User {user_id}: File received: {original_name} ({file_info.file_size} bytes).")
 
         keyboard = InlineKeyboardMarkup(
             [
@@ -249,7 +284,7 @@ async def handle_file(client: Client, message: Message):
                 ]
             ]
         )
-
+        
         await message.reply_text(
             f"What do you want me to do with this file?\n\n"
             f"File Name :- `{original_name}`\n"
@@ -259,6 +294,7 @@ async def handle_file(client: Client, message: Message):
         )
     else:
         await message.reply_text("I can only process documents, videos, audio, and photos.")
+        logger.warning(f"User {user_id}: Sent an unsupported file type.")
 
 
 @Client.on_message(filters.private & filters.text & force_sub)
@@ -267,29 +303,32 @@ async def handle_text_input(client: Client, message: Message):
     user_id = message.from_user.id
     active_op = db.get_active_operation(user_id)
     text_input = message.text.strip()
+    logger.info(f"User {user_id}: Received text input '{text_input}' in state: {active_op.get('state')}.")
 
     if not active_op:
         await message.reply_text("I'm not expecting text input right now. Please send a file or use /start.")
+        logger.warning(f"User {user_id}: Sent unexpected text input '{text_input}'.")
         return
 
     current_state = active_op.get("state")
 
     if current_state == "waiting_for_new_name":
         new_name = text_input
-
-        db.update_user_field(user_id, "active_file_operation.state", None)
+        
+        db.update_user_field(user_id, "active_file_operation.state", None) # Clear state
 
         sent_message = await message.reply_text("Starting operation...")
-
+        
         download_path = None
         renamed_path = None
         thumbnail_path = None
 
         try:
             download_start_time = time.time()
+            logger.info(f"User {user_id}: Starting download of {active_op['original_name']}.")
             download_path = await client.download_media(
                 active_op["file_id"],
-                file_name=os.path.join("downloads", active_op["original_name"]),
+                file_name=os.path.join(DOWNLOAD_DIR, active_op["original_name"]), # Use DOWNLOAD_DIR
                 progress=progress_for_pyrogram,
                 progress_args=(
                     active_op["pyrogram_file_obj"].get("file_size", 1),
@@ -298,17 +337,23 @@ async def handle_text_input(client: Client, message: Message):
                     download_start_time
                 )
             )
+            logger.info(f"User {user_id}: Downloaded {download_path}.")
             await sent_message.edit_text(f"Downloaded `{active_op['original_name']}`. Renaming to `{new_name}`...")
 
-            if active_op.get("custom_thumbnail_id"):
-                thumbnail_path = await client.download_media(active_op["custom_thumbnail_id"])
+            # Get or generate thumbnail
+            thumbnail_path = await get_or_generate_thumbnail(client, message, active_op, download_path)
+            if thumbnail_path:
+                logger.info(f"User {user_id}: Thumbnail prepared: {thumbnail_path}.")
             else:
-                thumbnail_path = await get_or_generate_thumbnail(client, message, active_op, download_path)
+                logger.warning(f"User {user_id}: No thumbnail prepared for upload.")
 
-            download_dir = os.path.dirname(download_path)
-            renamed_path = os.path.join(download_dir, new_name)
+            # Ensure download directory exists before attempting rename
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            renamed_path = os.path.join(DOWNLOAD_DIR, new_name) # Ensure renamed file is in DOWNLOAD_DIR
 
             os.rename(download_path, renamed_path)
+            logger.info(f"User {user_id}: Renamed {download_path} to {renamed_path}.")
+
 
             upload_params = {
                 "chat_id": message.chat.id,
@@ -318,6 +363,7 @@ async def handle_text_input(client: Client, message: Message):
                 upload_params["thumb"] = thumbnail_path
 
             upload_start_time = time.time()
+            logger.info(f"User {user_id}: Starting upload of {renamed_path}.")
             if active_op["file_type"] == "document":
                 await client.send_document(
                     document=renamed_path,
@@ -367,43 +413,55 @@ async def handle_text_input(client: Client, message: Message):
                     **upload_params
                 )
             elif active_op["file_type"] == "photo":
+                # For photos, Pyrogram send_photo directly uses file path;
+                # progress is not directly supported like download_media.
                 await client.send_photo(
                     photo=renamed_path,
                     **upload_params
                 )
                 await sent_message.edit_text("Uploading photo... (progress not shown)")
-
-
+            
             await sent_message.edit_text(f"File successfully renamed and sent! New name: `{new_name}`")
             db.increment_daily_upload(user_id, active_op["file_size"])
+            logger.info(f"User {user_id}: File {new_name} uploaded successfully.")
 
         except FloodWait as e:
             await sent_message.edit_text(f"Telegram is asking me to wait for {e.value} seconds. Please try again later.")
+            logger.warning(f"FloodWait Error for user {user_id} during file operation: {e}", exc_info=True)
         except Exception as e:
             await sent_message.edit_text(f"An error occurred: `{e}`")
+            logger.error(f"Error in handle_text_input for user {user_id} - File: {active_op.get('original_name', 'N/A')}: {e}", exc_info=True)
         finally:
             db.clear_active_operation(user_id)
+            # Cleanup downloaded/renamed files and thumbnails
             if download_path and os.path.exists(download_path):
                 os.remove(download_path)
+                logger.debug(f"Cleaned up download: {download_path}")
             if renamed_path and os.path.exists(renamed_path):
                 os.remove(renamed_path)
+                logger.debug(f"Cleaned up renamed file: {renamed_path}")
             if thumbnail_path and os.path.exists(thumbnail_path):
                 os.remove(thumbnail_path)
-
-            os.makedirs("downloads", exist_ok=True)
-            os.makedirs("thumbnails", exist_ok=True)
-
+                logger.debug(f"Cleaned up thumbnail: {thumbnail_path}")
+            
+            # Ensure base directories exist for next operations
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            os.makedirs(THUMBNAIL_DIR, exist_ok=True)
+            logger.debug(f"Ensured {DOWNLOAD_DIR} and {THUMBNAIL_DIR} exist.")
+    
     elif current_state == "waiting_for_caption":
         if text_input == "/skip_caption":
             db.update_user_field(user_id, "active_file_operation.custom_caption_text", None)
             await message.reply_text("Skipped custom caption. Default caption will be used.")
+            logger.info(f"User {user_id}: Skipped custom caption for active operation.")
         else:
             db.update_user_field(user_id, "active_file_operation.custom_caption_text", text_input)
             await message.reply_text("Custom caption saved!")
-
+            logger.info(f"User {user_id}: Saved custom caption for active operation.")
+        
         db.update_user_field(user_id, "active_file_operation.state", None)
-        active_op = db.get_active_operation(user_id)
-
+        active_op = db.get_active_operation(user_id) # Refresh active_op after update
+        
         keyboard = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("Rename File", callback_data="rename_file")]
@@ -416,6 +474,7 @@ async def handle_text_input(client: Client, message: Message):
 
     else:
         await message.reply_text("I'm not sure what you mean. Please use the buttons or send a file.")
+        logger.debug(f"User {user_id}: Unhandled text input '{text_input}' in state {current_state}.")
 
 @Client.on_message(filters.command("skip_thumbnail") & filters.private & force_sub)
 async def skip_thumbnail_command(client: Client, message: Message):
@@ -425,8 +484,10 @@ async def skip_thumbnail_command(client: Client, message: Message):
         db.update_user_field(user_id, "active_file_operation.custom_thumbnail_id", None)
         db.update_user_field(user_id, "active_file_operation.state", None)
         await message.reply_text("Skipped custom thumbnail. Default thumbnail will be used. Now send the **new name** for the file.")
+        logger.info(f"User {user_id}: Skipped custom thumbnail for active operation.")
     else:
         await message.reply_text("No active thumbnail request to skip.")
+        logger.debug(f"User {user_id}: Tried to skip thumbnail but not in state 'waiting_for_thumbnail'.")
 
 @Client.on_message(filters.command("skip_caption") & filters.private & force_sub)
 async def skip_caption_command(client: Client, message: Message):
@@ -441,5 +502,7 @@ async def skip_caption_command(client: Client, message: Message):
             ]
         )
         await message.reply_text("Skipped custom caption. Default caption will be used. Now you can proceed with renaming.", reply_markup=keyboard)
+        logger.info(f"User {user_id}: Skipped custom caption for active operation via command.")
     else:
         await message.reply_text("No active caption request to skip.")
+        logger.debug(f"User {user_id}: Tried to skip caption but not in state 'waiting_for_caption'.")
