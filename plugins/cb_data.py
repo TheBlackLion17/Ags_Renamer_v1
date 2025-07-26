@@ -3,6 +3,7 @@ from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBu
 from database import db
 from config import UPDATE_CHANNEL_URL, SUPPORT_GROUP_URL, HELP_TEXT, ABOUT_TEXT, START_UP_PIC
 from filter_plugins import force_sub
+from logger import logger # Import logger
 import os # For checking if START_UP_PIC is a local file
 
 # This file will centralize the handling of common callback query data
@@ -12,9 +13,11 @@ import os # For checking if START_UP_PIC is a local file
 async def handle_general_callback_data(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     data = callback_query.data
+    logger.info(f"User {user_id} clicked general callback: {data}")
 
     # Always check force subscribe first, unless it's the 'check_force_sub' itself
     if data != "check_force_sub" and not await force_sub(None, client, callback_query):
+        logger.warning(f"User {user_id} failed force_sub check on general callback {data}.")
         return
 
     # Handle 'check_force_sub' specifically if it was the initial trigger
@@ -24,8 +27,9 @@ async def handle_general_callback_data(client: Client, callback_query: CallbackQ
         await callback_query.answer("Checking subscription status...", show_alert=True)
         # Re-trigger start command to refresh state if subscription is now met
         # Note: This is a simplified way; a more robust solution might re-check without re-sending full start message
-        from plugins.handlers import start_command # Import start_command from handlers
-        await start_command(client, callback_query.message)
+        from plugins.start import start_command_plugin # Import start_command_plugin from plugins.start
+        await start_command_plugin(client, callback_query.message)
+        logger.info(f"User {user_id}: Processed check_force_sub callback.")
         return
 
     # Handle common navigation callbacks
@@ -35,6 +39,7 @@ async def handle_general_callback_data(client: Client, callback_query: CallbackQ
         )
         await callback_query.message.edit_text(HELP_TEXT, reply_markup=keyboard, disable_web_page_preview=True)
         await callback_query.answer()
+        logger.info(f"User {user_id}: Displayed help menu.")
 
     elif data == "about_command":
         keyboard = InlineKeyboardMarkup(
@@ -42,6 +47,7 @@ async def handle_general_callback_data(client: Client, callback_query: CallbackQ
         )
         await callback_query.message.edit_text(ABOUT_TEXT, reply_markup=keyboard, disable_web_page_preview=True)
         await callback_query.answer()
+        logger.info(f"User {user_id}: Displayed about menu.")
 
     elif data == "upgrade_premium":
         keyboard = InlineKeyboardMarkup(
@@ -53,6 +59,7 @@ async def handle_general_callback_data(client: Client, callback_query: CallbackQ
             reply_markup=keyboard
         )
         await callback_query.answer()
+        logger.info(f"User {user_id}: Displayed upgrade premium options.")
 
     elif data == "start_menu":
         user_data = db.get_user(user_id)
@@ -94,6 +101,7 @@ async def handle_general_callback_data(client: Client, callback_query: CallbackQ
                     caption=caption_text,
                     reply_markup=keyboard
                 )
+                logger.info(f"User {user_id}: Edited start menu photo caption.")
             else:
                 # If current message is not a photo, or START_UP_PIC is not URL, delete and send new
                 await callback_query.message.delete()
@@ -104,19 +112,22 @@ async def handle_general_callback_data(client: Client, callback_query: CallbackQ
                         caption=caption_text,
                         reply_markup=keyboard
                     )
+                    logger.info(f"User {user_id}: Sent new start menu photo.")
                 else:
                     await client.send_message( # Fallback to text if no photo or URL is invalid
                         chat_id=callback_query.message.chat.id,
                         text=caption_text,
                         reply_markup=keyboard
                     )
+                    logger.info(f"User {user_id}: Sent new start menu text.")
         except Exception as e:
-            print(f"Error handling start_menu callback: {e}")
+            logger.error(f"User {user_id}: Error handling start_menu callback: {e}", exc_info=True)
             # Fallback if editing/deleting fails (e.g., message too old)
             await callback_query.message.reply_text(caption_text, reply_markup=keyboard)
         
         await callback_query.answer()
+        logger.info(f"User {user_id}: Returned to start menu.")
 
     # Other specific callback data handlers (like "rename_file", "add_thumbnail", "cancel_operation", "add_caption")
-    # are already in `handlers.py` and are more tightly coupled with the active file operation state.
+    # are in `handlers.py` and are more tightly coupled with the active file operation state.
     # Keep them there unless you decide to refactor states into this file as well.
