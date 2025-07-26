@@ -3,16 +3,16 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import UPDATE_CHANNEL_URL, SUPPORT_GROUP_URL, HELP_TEXT, ABOUT_TEXT, START_UP_PIC
 from database import db
 from filter_plugins import force_sub
+from logger import logger # Import logger
 
 # This plugin specifically handles the /start command.
-# Note: There's a start_command in handlers.py. You should decide where the primary
-# /start logic resides. For modularity, it's better to move it here fully and
-# remove it from handlers.py. I'll put the full logic here.
+# Ensure this handler runs after plugins/refer.py if you want referral logic to apply first.
 
 @Client.on_message(filters.command("start") & filters.private & force_sub)
 async def start_command_plugin(client: Client, message: Message):
     """Handles the /start command and displays user plan info with inline keyboard."""
     user_id = message.from_user.id
+    logger.info(f"User {user_id} sent /start command (plugin).")
     user_data = db.get_user(user_id) # Get or create user (handled by lazyusers.py as well)
 
     plan_info = (
@@ -40,24 +40,12 @@ async def start_command_plugin(client: Client, message: Message):
         ]
     )
 
-    # Check for referral parameter
+    # Check for referral parameter - this part will only execute if plugins/refer.py's
+    # handler didn't consume the /start update. For robust referral, ensure refer.py
+    # processes it first. This is just for display.
     referred_by_message = ""
-    if message.text and len(message.text.split()) > 1:
-        param = message.text.split(None, 1)[1]
-        if param.startswith("ref_"):
-            referred_by_id = int(param.split("_")[1])
-            # Ensure the referrer is not the user themselves
-            if referred_by_id != user_id:
-                # You might want to prevent setting 'referred_by' if already set
-                current_referred_by = user_data.get("referred_by")
-                if not current_referred_by:
-                    db.update_user_field(user_id, "referred_by", referred_by_id)
-                    referred_by_message = f"You were referred by user `{referred_by_id}`!\n"
-                    # Add logic here to give benefits to the referrer if desired
-                elif current_referred_by == referred_by_id:
-                    referred_by_message = f"You are already referred by user `{referred_by_id}`.\n"
-                else:
-                    referred_by_message = f"You were referred by user `{current_referred_by}` already.\n"
+    if user_data.get("referred_by"):
+        referred_by_message = f"You were referred by user `{user_data['referred_by']}`!\n"
 
 
     caption_text = (
@@ -69,14 +57,20 @@ async def start_command_plugin(client: Client, message: Message):
     )
 
     if START_UP_PIC and START_UP_PIC.startswith(("http", "https")):
-        await client.send_photo(
-            chat_id=message.chat.id,
-            photo=START_UP_PIC,
-            caption=caption_text,
-            reply_markup=keyboard
-        )
+        try:
+            await client.send_photo(
+                chat_id=message.chat.id,
+                photo=START_UP_PIC,
+                caption=caption_text,
+                reply_markup=keyboard
+            )
+            logger.info(f"User {user_id}: Sent start photo from plugin.")
+        except Exception as e:
+            logger.error(f"User {user_id}: Failed to send start photo from plugin: {e}", exc_info=True)
+            await message.reply_text(caption_text, reply_markup=keyboard) # Fallback to text
     else:
         await message.reply_text(
             caption_text,
             reply_markup=keyboard
         )
+        logger.info(f"User {user_id}: Sent start text from plugin.")
